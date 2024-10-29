@@ -122,8 +122,8 @@ class MyCLI(LightningCLI):
     
     def __init__(self, model_class, datamodule_class):
         super().__init__(model_class, datamodule_class)
-        self.model_class = model_class
-        self.datamodule_class = datamodule_class
+        # self.model_class = model_class
+        # self.datamodule_class = datamodule_class
     
     def add_arguments_to_parser(self, parser):
         parser.add_class_arguments(ExtraArgs, "extra_args")
@@ -146,7 +146,8 @@ class MyCLI(LightningCLI):
         extra_args = self.config["fit"]["extra_args"].as_dict()
         data_params = self.config["fit"]["data"].as_dict()
         model_params = self.config["fit"]["model"]["hparams"].as_dict()
-        
+        # model_params = self.config["fit"]["model"].as_dict()
+
         layout = {
             "Check Overfit": {
                 "loss": ["Multiline", ["mean_loss_epoch/train", "mean_loss_epoch/validation"]],
@@ -245,17 +246,20 @@ class MyCLI(LightningCLI):
             print(f"No profiler set {_profiler}")
     
     def instantiate_classes(self):
-        
-        data_params = self.config["fit"]["data"].as_dict()
-        trainer_params = self.config["fit"]["trainer"].as_dict()
-        model_params = self.config["fit"]["model"]["hparams"].as_dict()
-        extra_args = self.config["fit"]["extra_args"].as_dict()
+
+        self.config_init = self.parser.instantiate_classes(self.config)
+
+        config = self.config[self.config.subcommand]
+
+        trainer_params = config["trainer"].as_dict()
+        data_params = config["data"].as_dict()
+        model_params = config["model"]["hparams"].as_dict()
+        # model_params = config["model"].as_dict()
+        extra_args = config["extra_args"].as_dict()
 
         #######################################################
         # Datamodule
         #######################################################
-        
-        # self.config.init_class(self.config.datamodule)
         self.datamodule = self.datamodule_class(
             dataset=data_params["dataset"],
             num_input_steps=data_params["num_input_steps"],
@@ -304,6 +308,24 @@ class MyCLI(LightningCLI):
             channels_last=model_params["channels_last"]
         )
 
+        ########################################################
+        # Modele
+        ########################################################
+        # self.model = self.model_class(model_params["lr"], model_params["batch_size"])
+        if extra_args["load_model_ckpt"]:
+            self.model = self.model_class.load_from_checkpoint(
+                extra_args["load_model_ckpt"], hparams=hp
+            )
+        else:
+            self.model = self.model_class(hp)
+
+        # A besoin de config_init pour etre lancé
+        # self._add_configure_optimizers_method_to_model(self.subcommand)
+        
+        ########################################################
+        # Trainer
+        ########################################################
+        # self.trainer = self.instantiate_trainer()
         self.trainer = pl.Trainer(
             num_nodes=int(os.environ.get("SLURM_NNODES", 1)),
             devices="auto",
@@ -322,20 +344,7 @@ class MyCLI(LightningCLI):
             limit_val_batches=trainer_params["limit_train_batches"],  # No reason to spend hours on validation if we limit the training.
             limit_test_batches=trainer_params["limit_train_batches"],
         )
-
-        ########################################################
-        # Modele
-        ########################################################
-        # self.model = self.model_class()
-        if extra_args["load_model_ckpt"]:
-            self.model = self.model_class.load_from_checkpoint(
-                extra_args["load_model_ckpt"], hparams=hp
-            )
-        else:
-            self.model = self.model_class(hp)
-
-        # Instancie le reste
-        super().instantiate_classes()
+        pass
 
 @dataclass
 class PlDataModule(pl.LightningDataModule):
