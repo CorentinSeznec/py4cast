@@ -43,6 +43,8 @@ LR_SCHEDULER_PERIOD: int = 10
 PLOT_PERIOD: int = 10
 
 from pytorch_lightning.cli import LightningCLI 
+# from lightning.pytorch.cli import LightningCLI
+
 from lightning_fabric.utilities import seed
 from py4cast.settings import ROOTDIR
 from datetime import datetime
@@ -53,7 +55,6 @@ from lightning.pytorch.profilers import AdvancedProfiler, PyTorchProfiler
 
 
 from pytorch_lightning import LightningModule, LightningDataModule 
-from pytorch_lightning.cli import LightningCLI 
 import torch
 from torch.utils.data import DataLoader
 
@@ -85,11 +86,16 @@ class MyDataModule(pl.LightningDataModule):
         return DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True)
  
  # Modèle Lightning 
+@dataclass
 class MyModel(pl.LightningModule): 
-    def __init__(self, lr): 
+        
+    lr: float = 0.01
+    batch_size: int= 5
+    
+    def __post_init__(self):
         super(MyModel, self).__init__() 
-        self.lr = lr
         self.layer = nn.Linear(10, 1) # 10 caractéristiques en entrée, 1 en sortie 
+    
     def forward(self, x): 
         return self.layer(x) 
     def training_step(self, batch, batch_idx): 
@@ -101,7 +107,17 @@ class MyModel(pl.LightningModule):
     def configure_optimizers(self): 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr) 
         return optimizer 
-    
+
+@dataclass
+class ExtraArgs:
+    campaign_name: str = "camp0"
+    run_name: str = "run"
+    dev_mode: bool = False
+    seed: int = 42
+    no_log: bool = False
+    profiler: str = "None" # Possibilities are ['simple', 'pytorch', 'None']"
+    load_model_ckpt: str = None
+
 class MyCLI(LightningCLI):
     
     def __init__(self, model_class, datamodule_class):
@@ -109,196 +125,217 @@ class MyCLI(LightningCLI):
         self.model_class = model_class
         self.datamodule_class = datamodule_class
     
-    # def before_instantiate_classes(self):
+    def add_arguments_to_parser(self, parser):
+        parser.add_class_arguments(ExtraArgs, "extra_args")
+
+        parser.link_arguments("data.dataset", "model.hparams.dataset_name")
+        parser.link_arguments("data.dataset_conf", "model.hparams.dataset_conf")
+        parser.link_arguments("data.dl_settings.batch_size", "model.hparams.batch_size")
+        parser.link_arguments("data.num_input_steps", "model.hparams.num_input_steps")
+        parser.link_arguments("data.num_pred_steps_train", "model.hparams.num_pred_steps_train")
+        parser.link_arguments("data.num_pred_steps_val_test", "model.hparams.num_pred_steps_val_test")
         
-        # layout = {
-        #     "Check Overfit": {
-        #         "loss": ["Multiline", ["mean_loss_epoch/train", "mean_loss_epoch/validation"]],
-        #     },
-        # }
+        parser.link_arguments("model.hparams.precision", "trainer.precision")
+        
+        # parser.add_argument("model.hparams.dataset_info")
+        # parser.link_arguments("data.train_dataset_info", "model.hparams.dataset_info", apply_on="instantiate")
+        pass
+
+    def before_instantiate_classes(self):
+        
+        extra_args = self.config["fit"]["extra_args"].as_dict()
+        data_params = self.config["fit"]["data"].as_dict()
+        model_params = self.config["fit"]["model"]["hparams"].as_dict()
+        
+        layout = {
+            "Check Overfit": {
+                "loss": ["Multiline", ["mean_loss_epoch/train", "mean_loss_epoch/validation"]],
+            },
+        }
         # Variables for multi-nodes multi-gpu training
-        # self.nb_nodes = int(os.environ.get("SLURM_NNODES", 1))
-        # if self.nb_nodes > 1:
-        #     gpus_per_node = len(os.environ.get("SLURM_STEP_GPUS", "1").split(","))
-        #     global_rank = int(os.environ.get("SLURM_PROCID", 0))
-        #     local_rank = global_rank - gpus_per_node * (global_rank // gpus_per_node)
-        #     print(
-        #         f"Global rank: {global_rank}, Local rank: {local_rank}, Gpus per node: {gpus_per_node}"
-        #     )
-        #     os.environ["LOCAL_RANK"] = str(local_rank)
-        #     os.environ["GLOBAL_RANK"] = os.environ.get("SLURM_PROCID", 0)
-        #     os.environ["NODE_RANK"] = os.environ.get("SLURM_NODEID", 0)
+        self.nb_nodes = int(os.environ.get("SLURM_NNODES", 1))
+        if self.nb_nodes > 1:
+            gpus_per_node = len(os.environ.get("SLURM_STEP_GPUS", "1").split(","))
+            global_rank = int(os.environ.get("SLURM_PROCID", 0))
+            local_rank = global_rank - gpus_per_node * (global_rank // gpus_per_node)
+            print(
+                f"Global rank: {global_rank}, Local rank: {local_rank}, Gpus per node: {gpus_per_node}"
+            )
+            os.environ["LOCAL_RANK"] = str(local_rank)
+            os.environ["GLOBAL_RANK"] = os.environ.get("SLURM_PROCID", 0)
+            os.environ["NODE_RANK"] = os.environ.get("SLURM_NODEID", 0)
 
-        # self.username = getpass.getuser()
-        # self.date = datetime.now()
+        self.username = getpass.getuser()
+        self.date = datetime.now()
 
-        # # Choose seed
-        # seed.seed_everything(self.config['trainer']["seed"])
+        # Choose seed
+        seed.seed_everything(extra_args["seed"])
 
-        # # Instantiate dl_settings
-        # self.dl_settings = TorchDataloaderSettings(
-        #     batch_size=self.config['data']["batch_size"],
-        #     num_workers=self.config['data']["num_workers"],
-        #     prefetch_factor=self.config['data']["prefetch_factor"],
-        #     pin_memory=self.config['data']['pin_memory'],
-        # )
+        # Instantiate dl_settings
+        self.dl_settings = TorchDataloaderSettings(
+            batch_size=data_params["dl_settings"]["batch_size"],
+            num_workers=data_params["dl_settings"]["num_workers"],
+            prefetch_factor=data_params["dl_settings"]["prefetch_factor"],
+            pin_memory=data_params["dl_settings"]['pin_memory'],
+        )
 
-        # # Get Log folders
-        # log_dir = ROOTDIR / "logs"
-        # folder = Path(self.config['trainer']['campaign_name']) / self.config['data']["dataset"] / self.config['model']["model"]
-        # run_name = f"{self.username[:4]}_{self.config['trainer']['run_name']}"
-        # if self.config['trainer']["dev_mode"]:
-        #     run_name += "_dev"
-        # list_subdirs = list((log_dir / folder).glob(f"{run_name}*"))
-        # list_versions = sorted([int(d.name.split("_")[-1]) for d in list_subdirs])
-        # version = 0 if list_subdirs == [] else list_versions[-1] + 1
-        # subfolder = f"{run_name}_{version}"
-        # self.save_path = log_dir / folder / subfolder
+        # Get Log folders
+        log_dir = ROOTDIR / "logs"
+        folder = Path(extra_args['campaign_name']) / data_params["dataset"] / model_params["model_name"]
+        run_name = f"{self.username[:4]}_{extra_args['run_name']}"
+        if extra_args["dev_mode"]:
+            run_name += "_dev"
+        list_subdirs = list((log_dir / folder).glob(f"{run_name}*"))
+        list_versions = sorted([int(d.name.split("_")[-1]) for d in list_subdirs])
+        version = 0 if list_subdirs == [] else list_versions[-1] + 1
+        subfolder = f"{run_name}_{version}"
+        self.save_path = log_dir / folder / subfolder
 
-        # # Logger & checkpoint callback
-        # self.callback_list = []
-        # if self.config['trainer']["no_log"]:
-        #     self.logger = None
-        # else:
-        #     print(
-        #         "--> Model, checkpoints, and tensorboard artifacts "
-        #         + f"will be saved in {self.save_path}."
-        #     )
-        #     self.logger = TensorBoardLogger(
-        #         save_dir=log_dir,
-        #         name=folder,
-        #         version=subfolder,
-        #         default_hp_metric=False,
-        #     )
-        #     self.logger.experiment.add_custom_scalars(layout)
-        #     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        #         dirpath=self.save_path,
-        #         filename="{epoch:02d}-{val_mean_loss:.2f}",  # Custom filename pattern
-        #         monitor="val_mean_loss",
-        #         mode="min",
-        #         save_top_k=1,  # Save only the best model
-        #         save_last=True,  # Also save the last model
-        #     )
-        #     self.callback_list.append(checkpoint_callback)
-        #     self.callback_list.append(LearningRateMonitor(logging_interval="step"))
-        #     self.callback_list.append(
-        #         EarlyStopping(monitor="val_mean_loss", mode="min", patience=50)
-        #     )
+        # Logger & checkpoint callback
+        self.callback_list = []
+        if extra_args["no_log"]:
+            self.logger = None
+        else:
+            print(
+                "--> Model, checkpoints, and tensorboard artifacts "
+                + f"will be saved in {self.save_path}."
+            )
+            self.logger = TensorBoardLogger(
+                save_dir=log_dir,
+                name=folder,
+                version=subfolder,
+                default_hp_metric=False,
+            )
+            self.logger.experiment.add_custom_scalars(layout)
+            checkpoint_callback = pl.callbacks.ModelCheckpoint(
+                dirpath=self.save_path,
+                filename="{epoch:02d}-{val_mean_loss:.2f}",  # Custom filename pattern
+                monitor="val_mean_loss",
+                mode="min",
+                save_top_k=1,  # Save only the best model
+                save_last=True,  # Also save the last model
+            )
+            self.callback_list.append(checkpoint_callback)
+            self.callback_list.append(LearningRateMonitor(logging_interval="step"))
+            self.callback_list.append(
+                EarlyStopping(monitor="val_mean_loss", mode="min", patience=50)
+            )
 
-        # # Setup profiler
-        # run_id = self.date.strftime("%b-%d-%Y-%M-%S")
-        # _profiler = self.config['trainer']["profiler"]
-        # if _profiler == "pytorch":
-        #     self.profiler = PyTorchProfiler(
-        #         dirpath=ROOTDIR / f"logs/{self.config['model']['model']}/{self.config['data']['dataset']}",
-        #         filename=f"torch_profile_{run_id}",
-        #         export_to_chrome=True,
-        #         profile_memory=True,
-        #     )
-        #     print("Initiate pytorchProfiler")
-        # elif _profiler == "advanced":
-        #     self.profiler = AdvancedProfiler(
-        #         dirpath=ROOTDIR / f"logs/{self.config['model']['model']}/{self.config['data']['dataset']}",
-        #         filename=f"advanced_profile_{run_id}",
-        #         line_count_restriction=50,  # Display top 50 lines
-        #     )
-        # elif _profiler == "simple":
-        #     self.profiler = _profiler
-        # else:
-        #     self.profiler = None
-        #     print(f"No profiler set {_profiler}")
-        
+        # Setup profiler
+        run_id = self.date.strftime("%b-%d-%Y-%M-%S")
+        _profiler = extra_args["profiler"]
+        if _profiler == "pytorch":
+            self.profiler = PyTorchProfiler(
+                dirpath=ROOTDIR / f"logs/{self.config['model']['model']}/{self.config['data']['dataset']}",
+                filename=f"torch_profile_{run_id}",
+                export_to_chrome=True,
+                profile_memory=True,
+            )
+            print("Initiate pytorchProfiler")
+        elif _profiler == "advanced":
+            self.profiler = AdvancedProfiler(
+                dirpath=ROOTDIR / f"logs/{self.config['model']['model']}/{self.config['data']['dataset']}",
+                filename=f"advanced_profile_{run_id}",
+                line_count_restriction=50,  # Display top 50 lines
+            )
+        elif _profiler == "simple":
+            self.profiler = _profiler
+        else:
+            self.profiler = None
+            print(f"No profiler set {_profiler}")
     
-    # def instantiate_classes(self):
+    def instantiate_classes(self):
         
+        data_params = self.config["fit"]["data"].as_dict()
+        trainer_params = self.config["fit"]["trainer"].as_dict()
+        model_params = self.config["fit"]["model"]["hparams"].as_dict()
+        extra_args = self.config["fit"]["extra_args"].as_dict()
+
         #######################################################
         # Datamodule
         #######################################################
-        # self.datamodule = self.datamodule_class()
         
-        # self.datamodule = PlDataModule(
-        #     dataset=self.config['data']["dataset"],
-        #     num_input_steps=self.config['data']["num_input_steps"],
-        #     num_pred_steps_train=self.config['data']["num_pred_steps_train"],
-        #     num_pred_steps_val_test=self.config['data']["num_pred_steps_val_test"],
-        #     dl_settings=self.dl_settings,
-        #     dataset_conf=self.config['data']["dataset_conf"],
-        #     config_override=None,
-        # )
+        # self.config.init_class(self.config.datamodule)
+        self.datamodule = self.datamodule_class(
+            dataset=data_params["dataset"],
+            num_input_steps=data_params["num_input_steps"],
+            num_pred_steps_train=data_params["num_pred_steps_train"],
+            num_pred_steps_val_test=data_params["num_pred_steps_val_test"],
+            dl_settings=self.dl_settings,
+            dataset_conf=data_params["dataset_conf"],
+            config_override=None,
+        )
 
-        # Get essential info to instantiate ArLightningHyperParam
-        # len_loader = self.datamodule.len_train_dl
-        # dataset_info = self.datamodule.train_dataset_info
+        # # Get essential info to instantiate ArLightningHyperParam
+        len_loader = self.datamodule.len_train_dl
+        dataset_info = self.datamodule.train_dataset_info
 
-        # # Setup GPU usage + get len of loader for LR scheduler
-        # if torch.cuda.is_available():
-        #     device_name = "cuda"
-        #     torch.backends.cuda.matmul.allow_tf32 = True
-        #     torch.backends.cudnn.allow_tf32 = True
-        #     torch.set_float32_matmul_precision("high")  # Allows using Tensor Cores on A100s
-        #     len_loader = len_loader // (torch.cuda.device_count() * self.nb_nodes)
-        # else:
-        #     device_name = "cpu"
-        #     len_loader = len_loader
+        # Setup GPU usage + get len of loader for LR scheduler
+        if torch.cuda.is_available():
+            device_name = "cuda"
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.set_float32_matmul_precision("high")  # Allows using Tensor Cores on A100s
+            len_loader = len_loader // (torch.cuda.device_count() * self.nb_nodes)
+        else:
+            device_name = "cpu"
+            len_loader = len_loader
 
-        # # HP
-        # hp = ArLightningHyperParam(
-        #     dataset_info=dataset_info,
-        #     dataset_name=self.config['data']['dataset'],
-        #     dataset_conf=self.config['data']["dataset_conf"],
-        #     batch_size=self.config['data']["batch_size"],
-        #     model_name=self.config['model']["model"],
-        #     model_conf=self.config['model']["model_conf"],
-        #     num_input_steps=self.config['data']['num_input_steps'],
-        #     num_pred_steps_train=self.config['data']['num_pred_steps_train'],
-        #     num_pred_steps_val_test=self.config['data']['num_pred_steps_val_test'],
-        #     num_inter_steps=self.config['data']['num_inter_steps'],
-        #     lr=self.config['model']['lr'],
-        #     loss=self.config['model']['loss'],
-        #     training_strategy=self.config['trainer']["strategy"],
-        #     len_train_loader=len_loader,
-        #     save_path=self.save_path,
-        #     use_lr_scheduler=self.config['model']['use_lr_scheduler'],
-        #     precision=self.config['trainer']['precision'],
-        #     no_log=self.config['trainer']["no_log"],
-        #     channels_last=self.config['trainer']["channels_last"]
-        # )
+        # HP
+        hp = ArLightningHyperParam(
+            dataset_info=dataset_info,
+            dataset_name=model_params['dataset_name'],
+            dataset_conf=model_params["dataset_conf"],
+            batch_size=model_params["batch_size"],
+            model_name=model_params["model_name"],
+            model_conf=model_params["model_conf"],
+            num_input_steps=model_params['num_input_steps'],
+            num_pred_steps_train=model_params['num_pred_steps_train'],
+            num_pred_steps_val_test=model_params['num_pred_steps_val_test'],
+            num_inter_steps=model_params['num_inter_steps'],
+            lr=model_params['lr'],
+            loss=model_params['loss'],
+            training_strategy=model_params["training_strategy"],
+            len_train_loader=len_loader,
+            save_path=self.save_path,
+            use_lr_scheduler=model_params['use_lr_scheduler'],
+            precision=model_params['precision'],
+            no_log=model_params["no_log"],
+            channels_last=model_params["channels_last"]
+        )
 
-
-        # self.trainer = pl.Trainer(
-        #     num_nodes=int(os.environ.get("SLURM_NNODES", 1)),
-        #     devices="auto",
-        #     max_epochs=self.config['trainer']['epochs'],
-        #     deterministic=True,
-        #     strategy="ddp",
-        #     accumulate_grad_batches=10,
-        #     accelerator=device_name,
-        #     logger=self.logger,
-        #     profiler=self.profiler,
-        #     log_every_n_steps=1,
-        #     callbacks=self.callback_list,
-        #     check_val_every_n_epoch=self.config['trainer']["val_interval"],
-        #     precision=self.config['trainer']["precision"],
-        #     limit_train_batches=self.config['trainer']["limit_train_batches"],
-        #     limit_val_batches=self.config['trainer']["limit_train_batches"],  # No reason to spend hours on validation if we limit the training.
-        #     limit_test_batches=self.config['trainer']["limit_train_batches"],
-        # )
+        self.trainer = pl.Trainer(
+            num_nodes=int(os.environ.get("SLURM_NNODES", 1)),
+            devices="auto",
+            max_epochs=trainer_params['max_epochs'],
+            deterministic=True,
+            strategy="ddp",
+            accumulate_grad_batches=10,
+            accelerator=device_name,
+            logger=self.logger,
+            profiler=self.profiler,
+            log_every_n_steps=1,
+            callbacks=self.callback_list,
+            check_val_every_n_epoch=trainer_params["check_val_every_n_epoch"],
+            precision=trainer_params["precision"],
+            limit_train_batches=trainer_params["limit_train_batches"],
+            limit_val_batches=trainer_params["limit_train_batches"],  # No reason to spend hours on validation if we limit the training.
+            limit_test_batches=trainer_params["limit_train_batches"],
+        )
 
         ########################################################
         # Modele
         ########################################################
         # self.model = self.model_class()
-        # if self.config['trainer']["load_model_ckpt"]:
-        #     self.model = AutoRegressiveLightning.load_from_checkpoint(
-        #         self.config['trainer']["load_model_ckpt"], hparams=hp
-        #     )
-        # else:
-        #     self.model = AutoRegressiveLightning(hp)
+        if extra_args["load_model_ckpt"]:
+            self.model = self.model_class.load_from_checkpoint(
+                extra_args["load_model_ckpt"], hparams=hp
+            )
+        else:
+            self.model = self.model_class(hp)
 
         # Instancie le reste
-        # super().instantiate_classes()
-
-
+        super().instantiate_classes()
 
 @dataclass
 class PlDataModule(pl.LightningDataModule):
@@ -312,11 +349,11 @@ class PlDataModule(pl.LightningDataModule):
     num_pred_steps_val_test: int
     dl_settings: TorchDataloaderSettings
     dataset_conf: Union[Path, None] = None
-    config_override: Union[Dict, None] = (None,)
+    config_override: Union[Dict, None] = None
 
     def __post_init__(self):
         super().__init__()
-
+        
         # Get dataset in initialisation to have access to this attribute before method trainer.fit
         self.train_ds, self.val_ds, self.test_ds = get_datasets(
             self.dataset,
@@ -351,17 +388,17 @@ class PlDataModule(pl.LightningDataModule):
     def predict_dataloader(self):
         return self.test_ds.torch_dataloader(self.dl_settings)
 
-
 @dataclass
 class ArLightningHyperParam:
     """
     Settings and hyperparameters for the lightning AR model.
     """
 
-    dataset_info: DatasetInfo
-    dataset_name: str
-    dataset_conf: Path
-    batch_size: int
+    dataset_info: DatasetInfo = None
+    dataset_name: str = "poesy"
+    dataset_conf: Path = None
+    
+    batch_size: int = 7
 
     model_conf: Union[Path, None] = None
     model_name: str = "halfunet"

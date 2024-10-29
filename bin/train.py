@@ -375,8 +375,8 @@ from py4cast.settings import ROOTDIR
 
 # Utilisation de LightningCLI
 def cli_main():
-    # cli = MyCLI(model_class = AutoRegressiveLightning, datamodule_class = PlDataModule) 
-    cli = MyCLI(MyModel, MyDataModule) 
+    cli = MyCLI(model_class = AutoRegressiveLightning, datamodule_class = PlDataModule) 
+    # cli = MyCLI(MyModel, PlDataModule) 
     
 if __name__ == "__main__": 
     a = cli_main()
