@@ -13,56 +13,57 @@
 #     dict_kwargs:
 #       profile_memory: true
 
-data:
-  dataset: "poesy"
-  dataset_conf: null
-  num_input_steps: 2
-  num_pred_steps_train: 1
-  num_pred_steps_val_test: 5
-  dl_settings: 
-    batch_size: 4
-    num_workers: 10
-    prefetch_factor: null
-    pin_memory: False
+# data:
+#   dataset: "poesy"
+#   dataset_conf: null
+#   num_input_steps: 2
+#   num_pred_steps_train: 1
+#   num_pred_steps_val_test: 5
+#   dl_settings: 
+#     batch_size: 4
+#     num_workers: 10
+#     prefetch_factor: null
+#     pin_memory: False
     
+data:
+  num_samples: 15
+model:
+  lr: 0.002
 
 # model:
-#   lr: 0.002
-#   batch_size: 3
-model:
-  hparams:
-    # dataset_name: linked
-    # dataset_conf linked
-    # batch_size linked
-    model_name: "halfunet"
-    model_conf: null
-    # num_input_steps linked
-    # num_pred_steps_train linked
-    # num_pred_steps_val_test linked
-    num_inter_steps: 1
-    lr: 1e-4
-    loss: "mse"
-    training_strategy: "diff_ar"
-    use_lr_scheduler: False
-    precision: "32"
-    no_log: False
-    channels_last: False
+#   hparams:
+#     # dataset_name: linked
+#     # dataset_conf linked
+#     # batch_size linked
+#     model_name: "halfunet"
+#     model_conf: null
+#     # num_input_steps linked
+#     # num_pred_steps_train linked
+#     # num_pred_steps_val_test linked
+#     num_inter_steps: 1
+#     lr: 1e-4
+#     loss: "mse"
+#     training_strategy: "diff_ar"
+#     use_lr_scheduler: False
+#     precision: "32"
+#     no_log: False
+#     channels_last: False
 
-trainer:
-  max_epochs: 200
-  check_val_every_n_epoch: 1
-  # precision linked
-  limit_train_batches: null
-  limit_val_batches: null
-  limit_test_batches: null
+# trainer:
+#   max_epochs: 200
+#   check_val_every_n_epoch: 1
+#   # precision linked
+#   limit_train_batches: null
+#   limit_val_batches: null
+#   limit_test_batches: null
 
-extra_args:
-  campaign_name: "camp0"
-  run_name: "run"
-  dev_mode: False
-  seed: 42
-  no_log: False
-  profiler: "None"
-  load_model_ckpt: null
+# extra_args:
+#   campaign_name: "camp0"
+#   run_name: "run"
+#   dev_mode: False
+#   seed: 42
+#   no_log: False
+#   profiler: "None"
+#   load_model_ckpt: null
 
 

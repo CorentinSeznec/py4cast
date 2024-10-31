@@ -69,18 +69,17 @@ class MyDataset(Dataset):
         # Générer des données d'entrée aléatoires et des cibles 
         self.data = torch.randn(num_samples, 10) # 10 caractéristiques 
         self.labels = torch.randn(num_samples, 1) # 1 cible  
-        
     def __len__(self): 
         return len(self.data) 
     def __getitem__(self, idx): 
         return self.data[idx], self.labels[idx] 
 
 class MyDataModule(pl.LightningDataModule): 
-    def __init__(self, batch_size = 1, num_samples = 40): 
+    def __init__(self, num_samples = 40): 
         super(MyDataModule, self).__init__() 
-        self.batch_size = batch_size 
         self.num_samples = num_samples 
         self.dataset = MyDataset(self.num_samples) 
+        self.batch_size = 9
     
     def train_dataloader(self): 
         return DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True)
@@ -107,6 +106,14 @@ class MyModel(pl.LightningModule):
     def configure_optimizers(self): 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr) 
         return optimizer 
+
+class MiniCLI(LightningCLI):
+    def __init__(self, model_class, datamodule_class):
+        super().__init__(model_class, datamodule_class)
+
+    
+    def add_arguments_to_parser(self, parser):
+        parser.link_arguments("data.batch_size", "model.batch_size", apply_on="instantiate")
 
 @dataclass
 class ExtraArgs:
