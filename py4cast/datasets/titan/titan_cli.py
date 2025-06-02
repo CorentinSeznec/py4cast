@@ -82,7 +82,10 @@ def prepare(
         train_ds.settings.standardize = False
         valid_ds.settings.standardize = False
         test_ds.settings.standardize = False
-
+        train_ds.settings.file_format = "grib"
+        valid_ds.settings.file_format = "grib"
+        test_ds.settings.file_format = "grib"
+        
         print("Converting gribs to npy...")
         print("train")
         convert_samples_grib2_numpy(train_ds)
